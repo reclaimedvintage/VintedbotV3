@@ -1,101 +1,150 @@
 import requests
+from bs4 import BeautifulSoup
+import json
+import os
+import re
 import time
 
-WEBHOOK_URL = "https://discord.com/api/webhooks/1512845629938860242/cI1uxNg-J9TFNZJThRcJVg0AX6Y-I5SP4_V44OyzvPL0V6Rg_6MuasGmzQ_NFRWL5Ng3"
+WEBHOOK_URL = "PUT YOUR WEBHOOK HERE"
 
-API_URL = "https://www.vinted.co.uk/api/v2/catalog/items"
+BASE_URL = "https://www.vinted.co.uk/catalog"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0",
-    "Accept": "application/json",
-    "Accept-Language": "en-GB,en;q=0.9",
-    "X-Requested-With": "XMLHttpRequest",
+    "Accept-Language": "en-GB,en;q=0.9"
 }
 
-SEARCHES = [
-    "ralph lauren",
-    "nike",
-    "carhartt",
-    "patagonia",
-    "north face"
-]
-
-VALID_SIZES = ["S", "M", "L"]
+SEEN_FILE = "seen_items.json"
 
 
-def send_to_discord(item, priority=False):
-    tag = "🚨 HIGH PRIORITY DEAL 🚨\n" if priority else ""
+def load_seen():
+    if os.path.exists(SEEN_FILE):
+        with open(SEEN_FILE, "r") as f:
+            return set(json.load(f))
+    return set()
 
-    image = item["photo"]["url"] if item.get("photo") else None
 
+def save_seen(seen):
+    with open(SEEN_FILE, "w") as f:
+        json.dump(list(seen), f)
+
+
+def extract_id(url):
+    match = re.search(r"/items/(\d+)", url)
+    return match.group(1) if match else url
+
+
+def send_to_discord(title, price, link, image):
     data = {
         "embeds": [
             {
-                "title": f"{tag}{item['title']}",
-                "url": item["url"],
-                "description": f"💷 £{item['price']}\n📏 Size: {item.get('size_title', 'N/A')}",
+                "title": title,
+                "url": link,
+                "description": f"💷 {price}",
                 "image": {"url": image} if image else {}
             }
         ]
     }
 
-    try:
-        requests.post(WEBHOOK_URL, json=data)
-    except Exception as e:
-        print("Discord error:", e)
+    requests.post(WEBHOOK_URL, json=data)
 
 
-def is_valid(item):
-    title = item["title"].lower()
-    size = item.get("size_title", "").upper()
+def scrape_page(page):
+    url = f"{BASE_URL}?search_text=ralph+lauren&order=newest_first&page={page}"
+
+    response = requests.get(url, headers=HEADERS)
+
+    if response.status_code != 200:
+        print("Failed page:", page)
+        return []
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    return soup.select("div.feed-grid__item")
+
+
+def is_valid(title, price, size):
+    title = title.lower()
+
+    # ✅ Must be Ralph Lauren
+    if not ("ralph" in title or "polo" in title):
+        return False
 
     # ✅ Size filter
-    if size not in VALID_SIZES:
+    if size not in ["S", "M", "L"]:
+        return False
+
+    # ✅ Price filter
+    try:
+        if float(price.replace("£", "").strip()) > 20:
+            return False
+    except:
         return False
 
     # ❌ Remove junk
-    bad_keywords = [
-        "kids", "baby", "fake", "replica",
-        "bundle", "job lot", "damaged",
-        "primark", "shein"
-    ]
-
-    if any(b in title for b in bad_keywords):
+    bad = ["kids", "baby", "fake", "bundle", "job lot", "damaged"]
+    if any(b in title for b in bad):
         return False
 
     return True
 
 
-def fetch_items(search_term):
-    params = {
-        "search_text": search_term,
-        "order": "newest_first",
-        "per_page": 100
-    }
-
-    try:
-        response = requests.get(API_URL, headers=HEADERS, params=params)
-        print(f"{search_term} → Status: {response.status_code}")
-
-        if response.status_code != 200:
-            return []
-
-        return response.json().get("items", [])
-
-    except Exception as e:
-        print("API error:", e)
-        return []
-
-
 def main():
-    print("Starting MULTI-BRAND SNIPER...")
+    print("Starting RL sniper...")
 
-    seen_ids = set()
-    total_sent = 0
+    seen = load_seen()
+    new_seen = set()
+    sent = 0
 
-    for search in SEARCHES:
-        print(f"\nChecking: {search}")
+    for page in range(1, 6):  # ✅ multiple pages
 
-        items = fetch_items(search)
-        print(f"Found {len(items)} items")
+        print(f"Page {page}")
 
+        items = scrape_page(page)
+
+        for item in items:
+            try:
+                a = item.find("a", href=True)
+                if not a:
+                    continue
+
+                link = "https://www.vinted.co.uk" + a["href"]
+
+                item_id = extract_id(link)
+
+                # ✅ skip duplicates (across runs)
+                if item_id in seen:
+                    continue
+
+                title = a.get("title") or a.get_text(strip=True)
+                if not title:
+                    continue
+
+                price_tag = item.find("span")
+                price = price_tag.get_text(strip=True) if price_tag else "?"
+
+                size = item.get_text().upper()
+
+                if not is_valid(title, price, size):
+                    continue
+
+                img = item.find("img")
+                image = img["src"] if img and "src" in img.attrs else None
+
+                send_to_discord(title, price, link, image)
+
+                new_seen.add(item_id)
+                sent += 1
+
+            except Exception as e:
+                print("Item error:", e)
+
+        time.sleep(1)
+
+    seen.update(new_seen)
+    save_seen(seen)
+
+    print(f"✅ Sent {sent} new items")
+
+
+if __name__ == "__main__":
+    main()
