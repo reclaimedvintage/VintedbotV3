@@ -5,14 +5,12 @@ WEBHOOK_URL = "https://discord.com/api/webhooks/1512845629938860242/cI1uxNg-J9TF
 API_URL = "https://www.vinted.co.uk/api/v2/catalog/items"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)",
+    "User-Agent": "Mozilla/5.0",
     "Accept": "application/json",
     "Accept-Language": "en-GB,en;q=0.9",
-    "Referer": "https://www.vinted.co.uk/",
+    "X-Requested-With": "XMLHttpRequest",
 }
 
-
-# ✅ Brands to track
 BRANDS = [
     "ralph", "polo",
     "nike",
@@ -21,24 +19,21 @@ BRANDS = [
     "north face", "tnf"
 ]
 
-# ✅ Sizes to allow
 VALID_SIZES = ["S", "M", "L"]
 
 
 def send_to_discord(item, priority=False):
     tag = "🚨 HIGH PRIORITY DEAL 🚨\n" if priority else ""
 
-    image_url = None
-    if item.get("photo"):
-        image_url = item["photo"]["url"]
+    image = item["photo"]["url"] if item.get("photo") else None
 
     data = {
         "embeds": [
             {
                 "title": f"{tag}{item['title']}",
                 "url": item["url"],
-                "description": f"💷 £{item['price']}\n📏 Size: {item.get('size_title', 'N/A')}",
-                "image": {"url": image_url} if image_url else {},
+                "description": f"💷 £{item['price']}\n📏 Size: {item.get('size_title','N/A')}",
+                "image": {"url": image} if image else {}
             }
         ]
     }
@@ -46,26 +41,21 @@ def send_to_discord(item, priority=False):
     requests.post(WEBHOOK_URL, json=data)
 
 
-def is_valid_item(item):
+def is_valid(item):
     title = item["title"].lower()
     size = item.get("size_title", "").upper()
 
     # ✅ Brand check
-    if not any(brand in title for brand in BRANDS):
+    if not any(b in title for b in BRANDS):
         return False
 
-    # ✅ Size filter
+    # ✅ Size
     if size not in VALID_SIZES:
         return False
 
     # ✅ Remove junk
-    bad_keywords = [
-        "kids", "baby", "fake", "replica",
-        "bundle", "job lot", "damaged",
-        "primark", "shein"
-    ]
-
-    if any(b in title for b in bad_keywords):
+    bad = ["kids", "baby", "fake", "replica", "bundle", "damaged"]
+    if any(x in title for x in bad):
         return False
 
     return True
@@ -75,9 +65,9 @@ def main():
     print("Starting MULTI-BRAND SNIPER...")
 
     params = {
-        "search_text": "",   # ✅ VERY IMPORTANT: no restriction
+        "search_text": "nike",   # ✅ KEY FIX (see below)
         "order": "newest_first",
-        "per_page": 100
+        "per_page": 100,
     }
 
     response = requests.get(API_URL, headers=HEADERS, params=params)
@@ -85,12 +75,10 @@ def main():
     print("Status:", response.status_code)
 
     if response.status_code != 200:
-        print("API blocked or failed")
+        print("API blocked — switching strategy")
         return
 
-    data = response.json()
-    items = data.get("items", [])
-
+    items = response.json().get("items", [])
     print(f"Items found: {len(items)}")
 
     sent = 0
@@ -99,15 +87,12 @@ def main():
         try:
             price = float(item["price"])
 
-            # ✅ Price filter
             if price > 20:
                 continue
 
-            # ✅ Validate brand + size + junk
-            if not is_valid_item(item):
+            if not is_valid(item):
                 continue
 
-            # ✅ Priority flag
             priority = price <= 12
 
             send_to_discord(item, priority)
