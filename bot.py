@@ -1,6 +1,9 @@
 import requests
 from bs4 import BeautifulSoup
 import time
+import json
+import os
+import re
 
 WEBHOOK_URL = "https://discord.com/api/webhooks/1512845629938860242/cI1uxNg-J9TFNZJThRcJVg0AX6Y-I5SP4_V44OyzvPL0V6Rg_6MuasGmzQ_NFRWL5Ng3"
 
@@ -11,10 +14,38 @@ HEADERS = {
     "Accept-Language": "en-GB,en;q=0.9"
 }
 
+SEEN_FILE = "seen_items.json"
 
-def send_to_discord(title, price, link):
+
+# ✅ Load seen items
+def load_seen():
+    if os.path.exists(SEEN_FILE):
+        with open(SEEN_FILE, "r") as f:
+            return set(json.load(f))
+    return set()
+
+
+# ✅ Save seen items
+def save_seen(seen):
+    with open(SEEN_FILE, "w") as f:
+        json.dump(list(seen), f)
+
+
+def extract_item_id(url):
+    match = re.search(r"/items/(\d+)", url)
+    return match.group(1) if match else url
+
+
+def send_to_discord(title, price, link, image):
     data = {
-        "content": f"👕 **Ralph Lauren**\n\n**{title}**\n💷 {price}\n🔗 {link}"
+        "embeds": [
+            {
+                "title": title,
+                "url": link,
+                "description": f"💷 {price}",
+                "image": {"url": image} if image else {},
+            }
+        ]
     }
     requests.post(WEBHOOK_URL, json=data)
 
@@ -22,78 +53,88 @@ def send_to_discord(title, price, link):
 def scrape_page(page):
     url = f"{BASE_URL}?search_text=ralph+lauren&order=newest_first&page={page}"
 
-    print(f"Scraping page {page}...")
-
     response = requests.get(url, headers=HEADERS)
 
     if response.status_code != 200:
-        print("Failed page:", page)
+        print("Blocked on page", page)
         return []
 
     soup = BeautifulSoup(response.text, "html.parser")
-
-    # ✅ THIS SELECTOR TARGETS ACTUAL PRODUCT CARDS
-    items = soup.select("div.feed-grid__item")
-
-    return items
+    return soup.select("div.feed-grid__item")
 
 
 def main():
-    print("Starting bot...")
+    print("Starting PRO bot...")
+
+    seen = load_seen()
+    new_seen = set()
 
     total_sent = 0
 
-    for page in range(1, 6):  # first 5 pages
+    for page in range(1, 6):
+        print(f"Checking page {page}...")
+
         items = scrape_page(page)
-        print(f"Items found on page {page}: {len(items)}")
 
         for item in items:
             try:
-                # ✅ LINK (correct)
                 a_tag = item.find("a", href=True)
                 if not a_tag:
                     continue
 
                 href = a_tag["href"]
+                link = "https://www.vinted.co.uk" + href if href.startswith("/") else href
 
-                # Ensure correct link formatting
-                if href.startswith("/"):
-                    link = "https://www.vinted.co.uk" + href
-                else:
-                    link = href
+                item_id = extract_item_id(link)
 
-                # ✅ TITLE (more reliable extraction)
-                title = a_tag.get("title")
-                if not title:
-                    title = a_tag.get_text(strip=True)
+                # ✅ Skip duplicates
+                if item_id in seen:
+                    continue
 
+                # ✅ Title
+                title = a_tag.get("title") or a_tag.get_text(strip=True)
                 if not title:
                     continue
 
-                # ✅ PRICE (better extraction)
-                price_tag = item.select_one("span[data-testid*='price']")
-                if price_tag:
-                    price = price_tag.get_text(strip=True)
-                else:
-                    # fallback
-                    price_span = item.find("span")
-                    price = price_span.get_text(strip=True) if price_span else "?"
+                # ✅ Price
+                price_tag = item.select_one("span")
+                price = price_tag.get_text(strip=True) if price_tag else "?"
+
+                # ✅ Image
+                img_tag = item.find("img")
+                image = img_tag["src"] if img_tag and "src" in img_tag.attrs else None
 
                 title_lower = title.lower()
 
-                # ✅ FILTER: Ralph Lauren only
+                # ✅ Ralph Lauren filter
                 if not any(x in title_lower for x in ["ralph", "polo", "rl"]):
                     continue
 
-                send_to_discord(title, price, link)
+                # ✅ Optional SNIPER MODE (uncomment to activate)
+                """
+                try:
+                    price_value = float(price.replace("£", "").strip())
+                    if price_value > 20:
+                        continue
+                except:
+                    pass
+                """
+
+                send_to_discord(title, price, link, image)
+
+                new_seen.add(item_id)
                 total_sent += 1
 
             except Exception as e:
-                print("Item error:", e)
+                print("Error:", e)
 
         time.sleep(2)
 
-    print(f"✅ Total sent: {total_sent}")
+    # ✅ Save updated seen list
+    seen.update(new_seen)
+    save_seen(seen)
+
+    print(f"✅ Sent {total_sent} NEW items")
 
 
 if __name__ == "__main__":
