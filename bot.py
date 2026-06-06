@@ -12,7 +12,6 @@ HEADERS = {
     "X-Requested-With": "XMLHttpRequest",
 }
 
-# ✅ Each brand searched separately
 SEARCHES = [
     "ralph lauren",
     "nike",
@@ -40,7 +39,10 @@ def send_to_discord(item, priority=False):
         ]
     }
 
-    requests.post(WEBHOOK_URL, json=data)
+    try:
+        requests.post(WEBHOOK_URL, json=data)
+    except Exception as e:
+        print("Discord error:", e)
 
 
 def is_valid(item):
@@ -51,7 +53,7 @@ def is_valid(item):
     if size not in VALID_SIZES:
         return False
 
-    # ✅ Remove junk listings
+    # ❌ Remove junk
     bad_keywords = [
         "kids", "baby", "fake", "replica",
         "bundle", "job lot", "damaged",
@@ -71,18 +73,22 @@ def fetch_items(search_term):
         "per_page": 100
     }
 
-    response = requests.get(API_URL, headers=HEADERS, params=params)
+    try:
+        response = requests.get(API_URL, headers=HEADERS, params=params)
+        print(f"{search_term} → Status: {response.status_code}")
 
-    print(f"{search_term} → Status:", response.status_code)
+        if response.status_code != 200:
+            return []
 
-    if response.status_code != 200:
+        return response.json().get("items", [])
+
+    except Exception as e:
+        print("API error:", e)
         return []
-
-    return response.json().get("items", [])
 
 
 def main():
-    print("Starting MULTI-BRAND SNIPER (correct version)...")
+    print("Starting MULTI-BRAND SNIPER...")
 
     seen_ids = set()
     total_sent = 0
@@ -92,20 +98,4 @@ def main():
 
         items = fetch_items(search)
         print(f"Found {len(items)} items")
-
-        for item in items:
-            try:
-                item_id = item["id"]
-
-                # ✅ Prevent duplicates across brands
-                if item_id in seen_ids:
-                    continue
-
-                seen_ids.add(item_id)
-
-                price = float(item["price"])
-
-                # ✅ HARD PRICE FILTER
-                if price > 20:
-                    continue
 
