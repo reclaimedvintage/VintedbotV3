@@ -1,75 +1,80 @@
 import requests
+from bs4 import BeautifulSoup
 
 WEBHOOK_URL = "https://discord.com/api/webhooks/1512845629938860242/cI1uxNg-J9TFNZJThRcJVg0AX6Y-I5SP4_V44OyzvPL0V6Rg_6MuasGmzQ_NFRWL5Ng3"
 
-SEARCH_URL = "https://www.vinted.co.uk/api/v2/catalog/items"
+URL = "https://www.vinted.co.uk/vetements?search_text=ralph+lauren"
 
-PARAMS = {
-    "search_text": "ralph lauren",
-    "currency": "GBP",
-    "order": "newest_first",
-    "per_page": 50  # more items = higher chance of results
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)",
+    "Accept-Language": "en-GB,en;q=0.9"
 }
 
 
-def send_to_discord(item):
-    message = {
-        "content": f"🔥 **New Find!**\n\n👕 {item['title']}\n💷 £{item['price']}\n🔗 {item['url']}"
+def send_to_discord(title, price, link):
+    data = {
+        "content": f"🔥 **New Find!**\n\n👕 {title}\n💷 {price}\n🔗 {link}"
     }
-
-    requests.post(WEBHOOK_URL, json=message)
-
-
-def get_items():
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
-
-    response = requests.get(SEARCH_URL, params=PARAMS, headers=headers)
-    return response.json()["items"]
-
-
-def is_good_item(item):
-    title = item["title"].lower()
-
-    keywords = [
-        "jumper", "sweater", "knit", "cable",
-        "wool", "cotton", "hoodie", "zip", "quarter zip"
-    ]
-
-    # Must include Ralph Lauren
-    if "ralph" not in title:
-        return False
-
-    # Price filter
-    try:
-        if float(item["price"]) > 25:   # slightly relaxed from £20
-            return False
-    except:
-        return False
-
-    # Broader keyword matching
-    return any(word in title for word in keywords)
+    requests.post(WEBHOOK_URL, json=data)
 
 
 def main():
-    items = get_items()
+    response = requests.get(URL, headers=HEADERS)
 
-    found = 0
+    print("Status:", response.status_code)
+
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    items = soup.find_all("a", href=True)
+
+    results = []
 
     for item in items:
-        if not is_good_item(item):
+        link = item.get("href")
+
+        if "/items/" not in link:
             continue
 
-        send_to_discord({
-            "title": item["title"],
-            "price": item["price"],
-            "url": item["url"]
-        })
+        title = item.get_text(strip=True)
 
-        found += 1
+        if not title:
+            continue
 
-    print(f"Sent {found} items")
+        full_link = "https://www.vinted.co.uk" + link
+
+        results.append((title, full_link))
+
+    print(f"Found {len(results)} items")
+
+    sent = 0
+
+    for title, link in results:
+        title_lower = title.lower()
+
+        if "ralph" not in title_lower:
+            continue
+
+        keywords = ["jumper", "sweater", "knit", "cable", "hoodie"]
+
+        if not any(k in title_lower for k in keywords):
+            continue
+
+        # crude price check (visible in title sometimes)
+        if "£" in title:
+            try:
+                price = title.split("£")[-1].split()[0]
+                if float(price) > 30:
+                    continue
+            except:
+                price = "?"
+
+        else:
+            price = "?"
+
+        send_to_discord(title, price, link)
+        sent += 1
+
+    print(f"Sent {sent} items")
 
 
 if __name__ == "__main__":
