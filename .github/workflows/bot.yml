@@ -2,8 +2,11 @@ name: Vinted RL Sniper
 
 on:
   schedule:
-    - cron: "*/3 * * * *"   # every 3 minutes (safe + fast)
+    - cron: "*/3 * * * *"
   workflow_dispatch:
+
+permissions:
+  contents: write   # ✅ THIS FIXES THE ERROR
 
 jobs:
   run-bot:
@@ -24,7 +27,6 @@ jobs:
       - name: Run bot
         run: python bot.py
 
-      # ✅ save updated seen_items.json
       - name: Commit seen items
         run: |
           git config --global user.name "bot"
