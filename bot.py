@@ -1,6 +1,4 @@
 import requests
-import time
-import random
 
 WEBHOOK_URL = "https://discord.com/api/webhooks/1512845629938860242/cI1uxNg-J9TFNZJThRcJVg0AX6Y-I5SP4_V44OyzvPL0V6Rg_6MuasGmzQ_NFRWL5Ng3"
 
@@ -8,13 +6,10 @@ SEARCH_URL = "https://www.vinted.co.uk/api/v2/catalog/items"
 
 PARAMS = {
     "search_text": "ralph lauren",
-    "price_to": 20,
     "currency": "GBP",
     "order": "newest_first",
-    "per_page": 20
+    "per_page": 50  # more items = higher chance of results
 }
-
-seen_ids = set()
 
 
 def send_to_discord(item):
@@ -35,41 +30,46 @@ def get_items():
 
 
 def is_good_item(item):
-    keywords = ["jumper", "sweater", "knit", "cable", "vintage"]
-
     title = item["title"].lower()
 
-    if float(item["price"]) > 20:
+    keywords = [
+        "jumper", "sweater", "knit", "cable",
+        "wool", "cotton", "hoodie", "zip", "quarter zip"
+    ]
+
+    # Must include Ralph Lauren
+    if "ralph" not in title:
         return False
 
+    # Price filter
+    try:
+        if float(item["price"]) > 25:   # slightly relaxed from £20
+            return False
+    except:
+        return False
+
+    # Broader keyword matching
     return any(word in title for word in keywords)
 
 
 def main():
-    while True:
-        try:
-            items = get_items()
+    items = get_items()
 
-            for item in items:
-                if item["id"] in seen_ids:
-                    continue
+    found = 0
 
-                if not is_good_item(item):
-                    continue
+    for item in items:
+        if not is_good_item(item):
+            continue
 
-                seen_ids.add(item["id"])
+        send_to_discord({
+            "title": item["title"],
+            "price": item["price"],
+            "url": item["url"]
+        })
 
-                send_to_discord({
-                    "title": item["title"],
-                    "price": item["price"],
-                    "url": item["url"]
-                })
+        found += 1
 
-            time.sleep(random.randint(90, 180))
-
-        except Exception as e:
-            print("Error:", e)
-            time.sleep(60)
+    print(f"Sent {found} items")
 
 
 if __name__ == "__main__":
