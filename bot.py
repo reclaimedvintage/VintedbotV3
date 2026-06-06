@@ -1,10 +1,13 @@
 import requests
 from bs4 import BeautifulSoup
 
+# ✅ YOUR DISCORD WEBHOOK
 WEBHOOK_URL = "https://discord.com/api/webhooks/1512845629938860242/cI1uxNg-J9TFNZJThRcJVg0AX6Y-I5SP4_V44OyzvPL0V6Rg_6MuasGmzQ_NFRWL5Ng3"
 
-URL = "https://www.vinted.co.uk/vetements?search_text=ralph+lauren"
+# ✅ VINTED SEARCH PAGE (REAL WEBSITE)
+URL = "https://www.vinted.co.uk/catalog?search_text=ralph+lauren&order=newest_first"
 
+# ✅ HEADERS (VERY IMPORTANT - makes it look like a real phone user)
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)",
     "Accept-Language": "en-GB,en;q=0.9"
@@ -12,70 +15,53 @@ HEADERS = {
 
 
 def send_to_discord(title, price, link):
-    data = {
+    message = {
         "content": f"🔥 **New Find!**\n\n👕 {title}\n💷 {price}\n🔗 {link}"
     }
-    requests.post(WEBHOOK_URL, json=data)
+
+    response = requests.post(WEBHOOK_URL, json=message)
+
+    print(f"Sent to Discord: {response.status_code}")
 
 
 def main():
+    print("Starting bot...")
+
+    # ✅ Request the real Vinted page
     response = requests.get(URL, headers=HEADERS)
 
-    print("Status:", response.status_code)
+    print("Website status:", response.status_code)
 
+    # ✅ Parse HTML
     soup = BeautifulSoup(response.text, "html.parser")
 
-    items = soup.find_all("a", href=True)
+    # ✅ Find listings (this is the correct container)
+    items = soup.select("div.feed-grid__item")
 
-    results = []
+    print(f"Items detected on page: {len(items)}")
+
+    sent_count = 0
 
     for item in items:
-        link = item.get("href")
+        try:
+            # ✅ Extract link
+            link_tag = item.find("a", href=True)
+            if not link_tag:
+                continue
 
-        if "/items/" not in link:
-            continue
+            link = "https://www.vinted.co.uk" + link_tag["href"]
 
-        title = item.get_text(strip=True)
+            # ✅ Extract title
+            title_tag = item.find("p")
+            title = title_tag.text.strip() if title_tag else "No title"
 
-        if not title:
-            continue
+            # ✅ Extract price
+            price_tag = item.find("span")
+            price = price_tag.text.strip() if price_tag else "?"
 
-        full_link = "https://www.vinted.co.uk" + link
+            # ✅ FILTERING
+            title_lower = title.lower()
 
-        results.append((title, full_link))
+            if "ralph" not in title_lower:
+                continue
 
-    print(f"Found {len(results)} items")
-
-    sent = 0
-
-    for title, link in results:
-        title_lower = title.lower()
-
-        if "ralph" not in title_lower:
-            continue
-
-        keywords = ["jumper", "sweater", "knit", "cable", "hoodie"]
-
-        if not any(k in title_lower for k in keywords):
-            continue
-
-        # crude price check (visible in title sometimes)
-        if "£" in title:
-            try:
-                price = title.split("£")[-1].split()[0]
-                if float(price) > 30:
-                    continue
-            except:
-                price = "?"
-
-        else:
-            price = "?"
-
-        send_to_discord(title, price, link)
-        sent += 1
-
-    print(f"Sent {sent} items")
-
-
-if __name__ == "__main__":
-    main()
