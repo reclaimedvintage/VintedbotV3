@@ -1,4 +1,5 @@
 import requests
+import time
 
 WEBHOOK_URL = "https://discord.com/api/webhooks/1512845629938860242/cI1uxNg-J9TFNZJThRcJVg0AX6Y-I5SP4_V44OyzvPL0V6Rg_6MuasGmzQ_NFRWL5Ng3"
 
@@ -11,12 +12,13 @@ HEADERS = {
     "X-Requested-With": "XMLHttpRequest",
 }
 
-BRANDS = [
-    "ralph", "polo",
+# ✅ Each brand searched separately
+SEARCHES = [
+    "ralph lauren",
     "nike",
     "carhartt",
     "patagonia",
-    "north face", "tnf"
+    "north face"
 ]
 
 VALID_SIZES = ["S", "M", "L"]
@@ -32,7 +34,7 @@ def send_to_discord(item, priority=False):
             {
                 "title": f"{tag}{item['title']}",
                 "url": item["url"],
-                "description": f"💷 £{item['price']}\n📏 Size: {item.get('size_title','N/A')}",
+                "description": f"💷 £{item['price']}\n📏 Size: {item.get('size_title', 'N/A')}",
                 "image": {"url": image} if image else {}
             }
         ]
@@ -45,64 +47,65 @@ def is_valid(item):
     title = item["title"].lower()
     size = item.get("size_title", "").upper()
 
-    # ✅ Brand check
-    if not any(b in title for b in BRANDS):
-        return False
-
-    # ✅ Size
+    # ✅ Size filter
     if size not in VALID_SIZES:
         return False
 
-    # ✅ Remove junk
-    bad = ["kids", "baby", "fake", "replica", "bundle", "damaged"]
-    if any(x in title for x in bad):
+    # ✅ Remove junk listings
+    bad_keywords = [
+        "kids", "baby", "fake", "replica",
+        "bundle", "job lot", "damaged",
+        "primark", "shein"
+    ]
+
+    if any(b in title for b in bad_keywords):
         return False
 
     return True
 
 
-def main():
-    print("Starting MULTI-BRAND SNIPER...")
-
+def fetch_items(search_term):
     params = {
-        "search_text": "nike",   # ✅ KEY FIX (see below)
+        "search_text": search_term,
         "order": "newest_first",
-        "per_page": 100,
+        "per_page": 100
     }
 
     response = requests.get(API_URL, headers=HEADERS, params=params)
 
-    print("Status:", response.status_code)
+    print(f"{search_term} → Status:", response.status_code)
 
     if response.status_code != 200:
-        print("API blocked — switching strategy")
-        return
+        return []
 
-    items = response.json().get("items", [])
-    print(f"Items found: {len(items)}")
-
-    sent = 0
-
-    for item in items:
-        try:
-            price = float(item["price"])
-
-            if price > 20:
-                continue
-
-            if not is_valid(item):
-                continue
-
-            priority = price <= 12
-
-            send_to_discord(item, priority)
-            sent += 1
-
-        except Exception as e:
-            print("Error:", e)
-
-    print(f"✅ Sent {sent} items")
+    return response.json().get("items", [])
 
 
-if __name__ == "__main__":
-    main()
+def main():
+    print("Starting MULTI-BRAND SNIPER (correct version)...")
+
+    seen_ids = set()
+    total_sent = 0
+
+    for search in SEARCHES:
+        print(f"\nChecking: {search}")
+
+        items = fetch_items(search)
+        print(f"Found {len(items)} items")
+
+        for item in items:
+            try:
+                item_id = item["id"]
+
+                # ✅ Prevent duplicates across brands
+                if item_id in seen_ids:
+                    continue
+
+                seen_ids.add(item_id)
+
+                price = float(item["price"])
+
+                # ✅ HARD PRICE FILTER
+                if price > 20:
+                    continue
+
