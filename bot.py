@@ -1,13 +1,10 @@
 import requests
 from bs4 import BeautifulSoup
 
-# ✅ YOUR DISCORD WEBHOOK
 WEBHOOK_URL = "https://discord.com/api/webhooks/1512845629938860242/cI1uxNg-J9TFNZJThRcJVg0AX6Y-I5SP4_V44OyzvPL0V6Rg_6MuasGmzQ_NFRWL5Ng3"
 
-# ✅ VINTED SEARCH PAGE (REAL WEBSITE)
 URL = "https://www.vinted.co.uk/catalog?search_text=ralph+lauren&order=newest_first"
 
-# ✅ HEADERS (VERY IMPORTANT - makes it look like a real phone user)
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)",
     "Accept-Language": "en-GB,en;q=0.9"
@@ -15,53 +12,85 @@ HEADERS = {
 
 
 def send_to_discord(title, price, link):
-    message = {
-        "content": f"🔥 **New Find!**\n\n👕 {title}\n💷 {price}\n🔗 {link}"
-    }
+    try:
+        message = {
+            "content": f"🔥 **New Find!**\n\n👕 {title}\n💷 {price}\n🔗 {link}"
+        }
 
-    response = requests.post(WEBHOOK_URL, json=message)
+        response = requests.post(WEBHOOK_URL, json=message)
+        print("Discord status:", response.status_code)
 
-    print(f"Sent to Discord: {response.status_code}")
+    except Exception as e:
+        print("Discord error:", e)
 
 
 def main():
     print("Starting bot...")
 
-    # ✅ Request the real Vinted page
-    response = requests.get(URL, headers=HEADERS)
+    try:
+        response = requests.get(URL, headers=HEADERS, timeout=10)
+        print("Website status:", response.status_code)
 
-    print("Website status:", response.status_code)
+    except Exception as e:
+        print("Request failed:", e)
+        return
 
-    # ✅ Parse HTML
+    if response.status_code != 200:
+        print("Blocked or failed request")
+        send_to_discord("⚠️ Vinted blocked the request", "N/A", URL)
+        return
+
     soup = BeautifulSoup(response.text, "html.parser")
 
-    # ✅ Find listings (this is the correct container)
     items = soup.select("div.feed-grid__item")
 
-    print(f"Items detected on page: {len(items)}")
+    print("Items detected:", len(items))
 
-    sent_count = 0
+    if len(items) == 0:
+        send_to_discord("⚠️ No items found (likely blocked)", "N/A", URL)
+        return
+
+    sent = 0
 
     for item in items:
         try:
-            # ✅ Extract link
             link_tag = item.find("a", href=True)
             if not link_tag:
                 continue
 
             link = "https://www.vinted.co.uk" + link_tag["href"]
 
-            # ✅ Extract title
             title_tag = item.find("p")
             title = title_tag.text.strip() if title_tag else "No title"
 
-            # ✅ Extract price
             price_tag = item.find("span")
             price = price_tag.text.strip() if price_tag else "?"
 
-            # ✅ FILTERING
             title_lower = title.lower()
 
             if "ralph" not in title_lower:
                 continue
 
+            keywords = ["jumper", "sweater", "knit", "cable", "hoodie"]
+
+            if not any(k in title_lower for k in keywords):
+                continue
+
+            try:
+                clean_price = float(price.replace("£", "").strip())
+                if clean_price > 30:
+                    continue
+            except:
+                pass
+
+            send_to_discord(title, price, link)
+            sent += 1
+
+        except Exception as e:
+            print("Item error:", e)
+
+    print("Sent items:", sent)
+
+
+if __name__ == "__main__":
+    main()
