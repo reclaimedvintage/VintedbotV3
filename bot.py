@@ -13,13 +13,10 @@ HEADERS = {
 
 
 def send_to_discord(title, price, link):
-    try:
-        data = {
-            "content": f"👕 **Ralph Lauren Item**\n\n{title}\n💷 {price}\n🔗 {link}"
-        }
-        requests.post(WEBHOOK_URL, json=data)
-    except Exception as e:
-        print("Discord error:", e)
+    data = {
+        "content": f"👕 **Ralph Lauren**\n\n**{title}**\n💷 {price}\n🔗 {link}"
+    }
+    requests.post(WEBHOOK_URL, json=data)
 
 
 def scrape_page(page):
@@ -30,57 +27,73 @@ def scrape_page(page):
     response = requests.get(url, headers=HEADERS)
 
     if response.status_code != 200:
-        print("Blocked or failed on page", page)
+        print("Failed page:", page)
         return []
 
     soup = BeautifulSoup(response.text, "html.parser")
 
+    # ✅ THIS SELECTOR TARGETS ACTUAL PRODUCT CARDS
     items = soup.select("div.feed-grid__item")
 
     return items
 
 
 def main():
-    print("Starting multi-page bot...")
+    print("Starting bot...")
 
     total_sent = 0
 
-    # ✅ Scrape first 5 pages (adjust if needed)
-    for page in range(1, 6):
-
+    for page in range(1, 6):  # first 5 pages
         items = scrape_page(page)
-        print(f"Items on page {page}: {len(items)}")
+        print(f"Items found on page {page}: {len(items)}")
 
         for item in items:
             try:
-                link_tag = item.find("a", href=True)
-                if not link_tag:
+                # ✅ LINK (correct)
+                a_tag = item.find("a", href=True)
+                if not a_tag:
                     continue
 
-                link = "https://www.vinted.co.uk" + link_tag["href"]
+                href = a_tag["href"]
 
-                title_tag = item.find("p")
-                title = title_tag.text.strip() if title_tag else "No title"
+                # Ensure correct link formatting
+                if href.startswith("/"):
+                    link = "https://www.vinted.co.uk" + href
+                else:
+                    link = href
 
-                price_tag = item.find("span")
-                price = price_tag.text.strip() if price_tag else "?"
+                # ✅ TITLE (more reliable extraction)
+                title = a_tag.get("title")
+                if not title:
+                    title = a_tag.get_text(strip=True)
+
+                if not title:
+                    continue
+
+                # ✅ PRICE (better extraction)
+                price_tag = item.select_one("span[data-testid*='price']")
+                if price_tag:
+                    price = price_tag.get_text(strip=True)
+                else:
+                    # fallback
+                    price_span = item.find("span")
+                    price = price_span.get_text(strip=True) if price_span else "?"
 
                 title_lower = title.lower()
 
-                # ✅ Only Ralph Lauren related
-                if not any(word in title_lower for word in ["ralph", "polo", "rl"]):
+                # ✅ FILTER: Ralph Lauren only
+                if not any(x in title_lower for x in ["ralph", "polo", "rl"]):
                     continue
 
                 send_to_discord(title, price, link)
                 total_sent += 1
 
             except Exception as e:
-                print("Error:", e)
+                print("Item error:", e)
 
-        # ✅ Small delay between pages (avoid blocking)
         time.sleep(2)
 
-    print(f"✅ Total items sent: {total_sent}")
+    print(f"✅ Total sent: {total_sent}")
 
 
 if __name__ == "__main__":
